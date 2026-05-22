@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+  }
+
+  * {
+    @apply border-gray-200;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer utilities {
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+.prose-content h2 {
+  @apply text-xl font-semibold text-gray-900 mt-6 mb-3;
+}
+.prose-content h3 {
+  @apply text-lg font-semibold text-gray-800 mt-5 mb-2;
+}
+.prose-content p {
+  @apply text-gray-700 leading-relaxed mb-4;
+}
+.prose-content ul {
+  @apply list-disc list-inside space-y-1 mb-4 text-gray-700;
+}
+.prose-content strong {
+  @apply font-semibold text-gray-900;
+}
+.prose-content a {
+  @apply text-blue-600 underline;
+}
+
+.prose-uk h2 {
+  @apply text-xl font-semibold text-gray-900 mt-8 mb-3 first:mt-0;
+}
+.prose-uk h3 {
+  @apply text-base font-semibold text-gray-800 mt-6 mb-2;
+}
+.prose-uk p {
+  @apply text-gray-700 leading-relaxed mb-4;
+}
+.prose-uk ul, .prose-uk ol {
+  @apply space-y-2 mb-4 text-gray-700 pl-5;
+}
+.prose-uk ul { @apply list-disc; }
+.prose-uk ol { @apply list-decimal; }
+.prose-uk strong { @apply font-semibold text-gray-900; }
+.prose-uk a { @apply text-brand-600 underline hover:text-brand-800; }
+.prose-uk code {
+  @apply bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-[0.9em] font-mono;
+}
+.prose-uk .not-prose {
+  font-size: inherit;
+}
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Focus visible polish */
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* Safe area for mobile bottom nav */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
