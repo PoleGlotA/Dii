@@ -10,6 +10,7 @@ import { FormField, FormSelect, FormTextarea } from "@/components/FormField";
 import { ImageUpload } from "@/components/ImageUpload";
 import { geocodeLocation } from "@/lib/geocoding";
 import type { PostType } from "@/types";
+import { AIPostHelper } from '@/components/AIPostHelper'
 
 export default function NewPostPage() {
   const { state, createPost } = useApp();
@@ -115,7 +116,20 @@ export default function NewPostPage() {
         <p className="text-sm text-gray-500 mb-6">
           Створіть подію, збір або новину. Усі поля з зірочкою — обов'язкові.
         </p>
-
+<AIPostHelper
+  type={type}
+  city={location}
+  onApply={({ title, description, content, tags,
+               suggestedDate, suggestedParticipants, suggestedAmount }) => {
+    if (title)       setTitle(title)
+    if (description) setDescription(description)
+    if (content)     setContent(content)
+    if (tags)        setTagsRaw(tags.join(', '))
+    if (suggestedDate)         setDate(suggestedDate)
+    if (suggestedParticipants) setMaxParticipants(String(suggestedParticipants))
+    if (suggestedAmount)       setTargetAmount(String(suggestedAmount))
+  }}
+/>
         <form onSubmit={handleSubmit} className="space-y-5">
           <FormSelect
             label="Тип публікації *"
