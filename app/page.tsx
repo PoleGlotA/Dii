@@ -12,6 +12,7 @@ import { haversineDistance } from "@/lib/distance";
 import { geocodeLocation } from "@/lib/geocoding";
 import type { Post } from "@/types";
 import { formatCurrency } from "@/lib/utils";
+import AIDashboard from '@/components/AIDashboard'
 
 export default function HomePage() {
   const { state } = useApp();
@@ -272,6 +273,13 @@ export default function HomePage() {
           <div className="border-t border-gray-200 mt-6 mb-6" />
         </section>
       )}
+      {state.currentUser && (
+  <AIDashboard
+    user={state.currentUser}
+    posts={state.posts}
+    bookings={state.bookings}
+  />
+)}
 
       <FilterBar
         active={filter}
