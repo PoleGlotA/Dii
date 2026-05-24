@@ -1,15 +1,11 @@
 'use client'
-// components/AIDashboard.tsx
-// Вставте в app/page.tsx:
-//   {state.currentUser && (
-//     <AIDashboard user={state.currentUser} posts={state.posts} bookings={state.bookings} />
-//   )}
-
+// components/AIDashboard.tsx — ФІНАЛЬНА ВЕРСІЯ з геофільтрацією
+ 
 import { useState, useEffect, useRef } from 'react'
 import {
   Sparkles, TrendingUp, MessageCircle, AlertTriangle,
   Users, MapPin, Clock, ChevronDown, ChevronUp,
-  Send, Loader2, Star, BarChart2,
+  Send, Loader2, Star, BarChart2, Navigation,
 } from 'lucide-react'
 import type { Post, User, Booking } from '@/types'
 import {
@@ -19,17 +15,21 @@ import {
   buildVolunteerProfile,
 } from '@/lib/aiHelpers'
 import type { AIRecommendation, AIForecast } from '@/types/ai'
-
-// ─── Пропси ─────────────────────────────────────────────────────────────
-
+ 
 interface AIDashboardProps {
   user: User
   posts: Post[]
   bookings: Booking[]
 }
-
-// ─── Допоміжний бейдж терміновості ───────────────────────────────────────
-
+ 
+interface GeoMeta {
+  radiusKm: number
+  volunteerCity: string
+  nearbyEvents: number
+  totalEvents: number
+  usingFallback: boolean
+}
+ 
 function UrgencyBadge({ urgency }: { urgency: AIRecommendation['urgency'] }) {
   const styles: Record<string, string> = {
     critical: 'bg-red-100 text-red-700 border border-red-200',
@@ -47,51 +47,54 @@ function UrgencyBadge({ urgency }: { urgency: AIRecommendation['urgency'] }) {
     </span>
   )
 }
-
-// ─── Головний компонент ───────────────────────────────────────────────────
-
+ 
 export default function AIDashboard({ user, posts, bookings }: AIDashboardProps) {
   const [activeTab, setActiveTab] = useState<'reco' | 'forecast' | 'chat'>('reco')
   const [isOpen, setIsOpen] = useState(true)
-
+ 
   // Рекомендації
   const [recommendations, setRecommendations] = useState<AIRecommendation[]>([])
   const [personalMessage, setPersonalMessage] = useState('')
   const [recoLoading, setRecoLoading] = useState(false)
   const [recoError, setRecoError] = useState('')
-
+  const [radiusKm, setRadiusKm] = useState(50)
+  const [geoMeta, setGeoMeta] = useState<GeoMeta | null>(null)
+ 
   // Прогноз
   const [forecast, setForecast] = useState<AIForecast | null>(null)
   const [forecastLoading, setForecastLoading] = useState(false)
   const [forecastSummary, setForecastSummary] = useState('')
-
+ 
   // Чат
   const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => { loadRecommendations() }, [user.id]) // eslint-disable-line
-
+ 
+  // Перезавантажуємо при зміні радіусу або користувача
+  useEffect(() => { loadRecommendations() }, [user.id, radiusKm]) // eslint-disable-line
+ 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
-
+ 
   async function loadRecommendations() {
     setRecoLoading(true)
     setRecoError('')
+    setGeoMeta(null)
     try {
       const profile = buildVolunteerProfile(user, bookings, posts)
-      const data = await fetchAIRecommendations(profile, posts)
+      const data = await fetchAIRecommendations(profile, posts, radiusKm)
       setRecommendations(data.recommendations ?? [])
       setPersonalMessage(data.personalMessage ?? '')
+      if (data._geoMeta) setGeoMeta(data._geoMeta)
     } catch {
       setRecoError('Не вдалося завантажити рекомендації')
     } finally {
       setRecoLoading(false)
     }
   }
-
+ 
   async function loadForecast() {
     if (forecast) return
     setForecastLoading(true)
@@ -99,13 +102,13 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
       const data = await fetchAIForecast(posts, bookings)
       setForecast(data)
       setForecastSummary(data.summary ?? '')
-    } catch {
-      // тиха помилка
+    } catch (e) {
+      console.error('Forecast error:', e)
     } finally {
       setForecastLoading(false)
     }
   }
-
+ 
   async function handleSendChat() {
     const text = chatInput.trim()
     if (!text || chatLoading) return
@@ -126,16 +129,14 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
       setChatLoading(false)
     }
   }
-
+ 
   function getPost(id: string) {
     return posts.find(p => p.id === id)
   }
-
-  // ─── Рендер ────────────────────────────────────────────────────────────
-
+ 
   return (
     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl mb-6 overflow-hidden shadow-sm">
-
+ 
       {/* Заголовок */}
       <button
         onClick={() => setIsOpen(v => !v)}
@@ -143,21 +144,16 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
       >
         <div className="flex items-center gap-2">
           <Sparkles size={18} className="text-purple-500" />
-          <span className="font-semibold text-gray-900 dark:text-white text-sm">
-            AI-асистент
-          </span>
+          <span className="font-semibold text-gray-900 dark:text-white text-sm">AI-асистент</span>
           {recommendations.length > 0 && (
             <span className="bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300 text-xs font-medium px-2 py-0.5 rounded-full">
               {recommendations.length} рекомендацій
             </span>
           )}
         </div>
-        {isOpen
-          ? <ChevronUp size={16} className="text-gray-400" />
-          : <ChevronDown size={16} className="text-gray-400" />
-        }
+        {isOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
       </button>
-
+ 
       {isOpen && (
         <>
           {/* Вкладки */}
@@ -183,25 +179,71 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
               </button>
             ))}
           </div>
-
+ 
           <div className="p-5">
-
+ 
             {/* ── Рекомендації ──────────────────────────────────────── */}
             {activeTab === 'reco' && (
               <div>
+                {/* Геопанель з вибором радіусу */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4
+                  bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800
+                  rounded-xl px-4 py-2.5">
+                  <div className="flex items-center gap-2 text-xs text-blue-800 dark:text-blue-300">
+                    <Navigation size={13} className="shrink-0" />
+                    {geoMeta ? (
+                      geoMeta.usingFallback ? (
+                        <span>
+                          Координати <strong>{geoMeta.volunteerCity}</strong> не знайдено —
+                          показані всі <strong>{geoMeta.totalEvents}</strong> подій
+                        </span>
+                      ) : (
+                        <span>
+                          <strong>{geoMeta.nearbyEvents}</strong> з <strong>{geoMeta.totalEvents}</strong> подій
+                          у радіусі <strong>{geoMeta.radiusKm} км</strong> від <strong>{geoMeta.volunteerCity}</strong>
+                          {geoMeta.nearbyEvents === 0 && ' — показані всі (fallback)'}
+                        </span>
+                      )
+                    ) : (
+                      <span>Пошук в радіусі <strong>{radiusKm} км</strong> від {user.location.split(',')[0]}</span>
+                    )}
+                  </div>
+ 
+                  {/* Кнопки вибору радіусу */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-xs text-blue-600 dark:text-blue-400 mr-1">Радіус:</span>
+                    {[25, 50, 100, 200].map(r => (
+                      <button
+                        key={r}
+                        onClick={() => setRadiusKm(r)}
+                        disabled={recoLoading}
+                        className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors disabled:opacity-50 ${
+                          radiusKm === r
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/30'
+                        }`}
+                      >
+                        {r} км
+                      </button>
+                    ))}
+                  </div>
+                </div>
+ 
                 {personalMessage && (
                   <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-100 dark:border-purple-800 rounded-xl px-4 py-3 mb-4 text-sm text-purple-800 dark:text-purple-300">
                     ✨ {personalMessage}
                   </div>
                 )}
-
+ 
                 {recoLoading && (
                   <div className="flex items-center gap-2 text-gray-500 py-4">
                     <Loader2 size={16} className="animate-spin" />
-                    <span className="text-sm">AI аналізує ваш профіль...</span>
+                    <span className="text-sm">
+                      AI шукає події в радіусі {radiusKm} км...
+                    </span>
                   </div>
                 )}
-
+ 
                 {recoError && (
                   <div className="text-sm text-red-600 flex items-center gap-2 py-2">
                     <AlertTriangle size={14} /> {recoError}
@@ -210,11 +252,22 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                     </button>
                   </div>
                 )}
-
+ 
                 {!recoLoading && !recoError && recommendations.length === 0 && (
-                  <p className="text-sm text-gray-500 py-2">Немає активних рекомендацій.</p>
+                  <div className="text-center py-6 space-y-2">
+                    <MapPin size={32} className="mx-auto text-gray-300" />
+                    <p className="text-sm text-gray-500">
+                      Немає активних подій у радіусі {radiusKm} км від {user.location.split(',')[0]}
+                    </p>
+                    <button
+                      onClick={() => setRadiusKm(r => Math.min(r * 2, 500))}
+                      className="text-xs text-blue-600 hover:underline"
+                    >
+                      Розширити до {Math.min(radiusKm * 2, 500)} км
+                    </button>
+                  </div>
                 )}
-
+ 
                 <div className="space-y-3">
                   {recommendations.map((reco, i) => {
                     const post = getPost(reco.postId)
@@ -224,7 +277,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                       post.maxParticipants !== undefined && post.currentParticipants !== undefined
                         ? post.maxParticipants - post.currentParticipants
                         : undefined
-
+ 
                     return (
                       <div
                         key={reco.postId}
@@ -240,15 +293,15 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                                 {reco.score}% відповідність
                               </span>
                             </div>
-
+ 
                             <h3 className="font-medium text-gray-900 dark:text-white text-sm mb-1 truncate">
                               {post.title}
                             </h3>
-
+ 
                             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 italic">
                               {reco.reason}
                             </p>
-
+ 
                             <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
                               <span className="flex items-center gap-1">
                                 <MapPin size={11} />{city}
@@ -265,7 +318,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                               )}
                             </div>
                           </div>
-
+ 
                           <a
                             href={`/post/${post.id}`}
                             className="shrink-0 text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg transition-colors"
@@ -277,7 +330,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                     )
                   })}
                 </div>
-
+ 
                 {!recoLoading && recommendations.length > 0 && (
                   <button
                     onClick={loadRecommendations}
@@ -288,7 +341,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                 )}
               </div>
             )}
-
+ 
             {/* ── Прогноз ───────────────────────────────────────────── */}
             {activeTab === 'forecast' && (
               <div>
@@ -298,14 +351,13 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                     <span className="text-sm">AI будує прогноз активності...</span>
                   </div>
                 )}
-
+ 
                 {!forecastLoading && !forecast && (
                   <p className="text-sm text-gray-400 py-2">Не вдалося завантажити прогноз.</p>
                 )}
-
+ 
                 {forecast && (
                   <>
-                    {/* Метрики */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                       {[
                         { label: 'Заявок за тиждень', value: forecast.weeklyTotal },
@@ -319,8 +371,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                         </div>
                       ))}
                     </div>
-
-                    {/* Графік по днях */}
+ 
                     {forecast.weeklyForecast?.length > 0 && (
                       <div className="mb-5">
                         <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
@@ -328,7 +379,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                         </p>
                         <div className="flex items-end gap-2 h-24">
                           {forecast.weeklyForecast.map(d => {
-                            const max = Math.max(...forecast.weeklyForecast.map(x => x.predictedRequests))
+                            const max = Math.max(...forecast.weeklyForecast.map((x: { predictedRequests: number }) => x.predictedRequests))
                             const pct = max > 0 ? (d.predictedRequests / max) * 100 : 0
                             const isPeak = d.day === forecast.peakDay
                             return (
@@ -345,29 +396,23 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                         </div>
                       </div>
                     )}
-
-                    {/* Брак по районах */}
+ 
                     {forecast.districtShortages?.length > 0 && (
                       <div className="mb-4">
                         <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3 flex items-center gap-1">
                           <Users size={13} /> Брак волонтерів по районах
                         </p>
                         <div className="space-y-2">
-                          {forecast.districtShortages.map(d => {
-                            const color =
-                              d.shortage === 'critical' ? 'bg-red-500' :
-                              d.shortage === 'moderate' ? 'bg-amber-400' : 'bg-green-500'
-                            const badge =
-                              d.shortage === 'critical' ? 'bg-red-100 text-red-700' :
-                              d.shortage === 'moderate' ? 'bg-amber-100 text-amber-700' :
-                              'bg-green-100 text-green-700'
+                          {forecast.districtShortages.map((d: { city: string; district: string; shortage: string; shortageScore: number }) => {
+                            const color = d.shortage === 'critical' ? 'bg-red-500' : d.shortage === 'moderate' ? 'bg-amber-400' : 'bg-green-500'
+                            const badge = d.shortage === 'critical' ? 'bg-red-100 text-red-700' : d.shortage === 'moderate' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'
                             return (
                               <div key={`${d.city}-${d.district}`} className="flex items-center gap-3">
                                 <span className="text-sm text-gray-700 dark:text-gray-300 w-32 shrink-0 truncate">
                                   {d.city}{d.district ? ` · ${d.district}` : ''}
                                 </span>
                                 <div className="flex-1 h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                                  <div className={`h-full rounded-full ${color}`} style={{ width: `${d.shortageScore}%` }} />
+                                  <div className={`h-full rounded-full ${color}`} style={{ width: `${d.shortageScore * 100}%` }} />
                                 </div>
                                 <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ${badge}`}>
                                   {d.shortage === 'critical' ? 'критично' : d.shortage === 'moderate' ? 'помірно' : 'норма'}
@@ -378,7 +423,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                         </div>
                       </div>
                     )}
-
+ 
                     {forecastSummary && (
                       <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-xl px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
                         {forecastSummary}
@@ -388,7 +433,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                 )}
               </div>
             )}
-
+ 
             {/* ── AI-чат ────────────────────────────────────────────── */}
             {activeTab === 'chat' && (
               <div className="flex flex-col gap-3">
@@ -409,7 +454,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                     ))}
                   </div>
                 )}
-
+ 
                 <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                   {chatMessages.map((m, i) => (
                     <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -417,8 +462,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                         ${m.role === 'user'
                           ? 'bg-purple-600 text-white rounded-br-sm'
                           : 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-bl-sm'
-                        }`}
-                      >
+                        }`}>
                         {m.content}
                       </div>
                     </div>
@@ -434,7 +478,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                   )}
                   <div ref={chatEndRef} />
                 </div>
-
+ 
                 <div className="flex gap-2 mt-1">
                   <input
                     type="text"
@@ -455,7 +499,7 @@ export default function AIDashboard({ user, posts, bookings }: AIDashboardProps)
                 </div>
               </div>
             )}
-
+ 
           </div>
         </>
       )}

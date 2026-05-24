@@ -1,49 +1,51 @@
-// lib/aiHelpers.ts
-// Утиліти для підготовки даних зі store перед відправкою до AI API.
+// lib/aiHelpers.ts — ФІНАЛЬНА ВЕРСІЯ з геофільтрацією 50 км
  
 import type { Post, User, Booking } from '@/types'
+import { geocodeLocation } from '@/lib/geocoding'
  
 export type { Post, User }
- 
-// Application = Booking у вашому проєкті
 export type Application = Booking
  
-// ─── Агрегація статистики для прогнозу ──────────────────────────────────
+// ─── Гаверсинус ──────────────────────────────────────────────────────────
+ 
+function haversineDistance(
+  lat1: number, lng1: number,
+  lat2: number, lng2: number
+): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+ 
+// ─── Агрегація для прогнозу ──────────────────────────────────────────────
  
 export function buildForecastStats(posts: Post[], bookings: Booking[]) {
-  const openEvents = posts.filter(
-    p => p.type === 'ПОДІЯ' && p.status !== 'closed'
-  )
+  const openEvents = posts.filter(p => p.type === 'ПОДІЯ' && p.status !== 'closed')
  
-  // Міста де бракує волонтерів (є відкриті місця)
   const citiesWithShortage = openEvents
     .filter(p => {
-      const spotsLeft =
-        p.maxParticipants !== undefined && p.currentParticipants !== undefined
-          ? p.maxParticipants - p.currentParticipants
-          : undefined
+      const spotsLeft = p.maxParticipants !== undefined && p.currentParticipants !== undefined
+        ? p.maxParticipants - p.currentParticipants : undefined
       return spotsLeft === undefined || spotsLeft > 0
     })
     .map(p => {
       const parts = p.location.split(',')
-      const city = parts[0]?.trim() ?? p.location
-      const district = parts[1]?.trim()
-      const spotsLeft =
-        p.maxParticipants !== undefined && p.currentParticipants !== undefined
-          ? p.maxParticipants - p.currentParticipants
-          : 5 // дефолт якщо не вказано
-      return { city, district, openSpots: spotsLeft }
+      const spotsLeft = p.maxParticipants !== undefined && p.currentParticipants !== undefined
+        ? p.maxParticipants - p.currentParticipants : 5
+      return { city: parts[0]?.trim() ?? p.location, district: parts[1]?.trim(), openSpots: spotsLeft }
     })
     .sort((a, b) => b.openSpots - a.openSpots)
     .slice(0, 10)
  
-  // Активність за останні 14 днів
   const twoWeeksAgo = new Date()
   twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
- 
-  const recentBookings = bookings.filter(
-    b => new Date(b.createdAt) >= twoWeeksAgo
-  )
+  const recentBookings = bookings.filter(b => new Date(b.createdAt) >= twoWeeksAgo)
  
   const byDay: Record<string, number> = {}
   recentBookings.forEach(b => {
@@ -51,58 +53,39 @@ export function buildForecastStats(posts: Post[], bookings: Booking[]) {
     byDay[day] = (byDay[day] ?? 0) + 1
   })
  
-  const recentActivityByDay = Object.entries(byDay)
-    .map(([date, count]) => ({ date, count }))
-    .sort((a, b) => a.date.localeCompare(b.date))
- 
-  // Топ теги
   const tagCount: Record<string, number> = {}
-  openEvents.forEach(p => {
-    p.tags.forEach(t => {
-      tagCount[t] = (tagCount[t] ?? 0) + 1
-    })
-  })
- 
-  const topCategories = Object.entries(tagCount)
-    .map(([tag, count]) => ({ tag, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8)
+  openEvents.forEach(p => p.tags.forEach(t => { tagCount[t] = (tagCount[t] ?? 0) + 1 }))
  
   return {
     totalPosts: posts.length,
     totalApplications: bookings.length,
     openEvents: openEvents.length,
     citiesWithShortage,
-    recentActivityByDay,
-    topCategories,
+    recentActivityByDay: Object.entries(byDay)
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    topCategories: Object.entries(tagCount)
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8),
   }
 }
  
-// ─── Підготовка профілю волонтера ────────────────────────────────────────
+// ─── Профіль волонтера ───────────────────────────────────────────────────
  
-export function buildVolunteerProfile(
-  user: User,
-  bookings: Booking[],
-  posts: Post[]
-) {
+export function buildVolunteerProfile(user: User, bookings: Booking[], posts: Post[]) {
   const acceptedPostIds = bookings
     .filter(b => b.userId === user.id && b.status === 'accepted')
     .map(b => b.postId)
  
-  const skillsFromHistory = Array.from(
-    new Set(
-      posts
-        .filter(p => acceptedPostIds.includes(p.id))
-        .flatMap(p => p.tags)
-    )
-  )
- 
-  const city = user.location.split(',')[0]?.trim() ?? user.location
+  const skillsFromHistory = Array.from(new Set(
+    posts.filter(p => acceptedPostIds.includes(p.id)).flatMap(p => p.tags)
+  ))
  
   return {
     id: user.id,
     name: user.name,
-    city,
+    city: user.location.split(',')[0]?.trim() ?? user.location,
     role: user.role,
     bio: user.bio,
     skills: skillsFromHistory,
@@ -110,27 +93,22 @@ export function buildVolunteerProfile(
   }
 }
  
-// ─── Підготовка постів для AI (маппінг полів) ────────────────────────────
+// ─── Маппінг постів для AI ───────────────────────────────────────────────
  
 export function mapPostsForAI(posts: Post[]) {
   return posts.map(p => {
-    const city = p.location.split(',')[0]?.trim() ?? p.location
-    const district = p.location.split(',')[1]?.trim()
-    const spotsLeft =
-      p.maxParticipants !== undefined && p.currentParticipants !== undefined
-        ? p.maxParticipants - p.currentParticipants
-        : undefined
- 
+    const spotsLeft = p.maxParticipants !== undefined && p.currentParticipants !== undefined
+      ? p.maxParticipants - p.currentParticipants : undefined
     return {
       id: p.id,
       title: p.title,
       description: p.description,
       type: 'event' as const,
-      city,
-      district,
+      city: p.location.split(',')[0]?.trim() ?? p.location,
+      district: p.location.split(',')[1]?.trim(),
       tags: p.tags,
       date: p.date,
-      status: p.status === 'closed' ? ('closed' as const) : ('open' as const),
+      status: p.status === 'closed' ? 'closed' as const : 'open' as const,
       spotsLeft,
       applicants: p.bookings?.map(b => b.userId),
       createdAt: p.createdAt,
@@ -138,53 +116,143 @@ export function mapPostsForAI(posts: Post[]) {
   })
 }
  
-// ─── Клієнтські функції виклику API ─────────────────────────────────────
+// ─── Геофільтрація ───────────────────────────────────────────────────────
+ 
+export async function filterPostsByRadius(
+  posts: Post[],
+  volunteerCity: string,
+  radiusKm = 50
+): Promise<{
+  posts: Post[]
+  volunteerCoords: { lat: number; lng: number } | null
+  nearbyCount: number
+  usingFallback: boolean
+}> {
+  // 1. Геокодуємо місто волонтера
+  const volunteerCoords = await geocodeLocation(volunteerCity)
+ 
+  if (!volunteerCoords) {
+    console.warn(`Не вдалося геокодувати місто волонтера: "${volunteerCity}"`)
+    return { posts, volunteerCoords: null, nearbyCount: posts.length, usingFallback: true }
+  }
+ 
+  // 2. Геокодуємо локації постів паралельно (з кешу — миттєво)
+  const postsWithCoords = await Promise.all(
+    posts.map(async p => {
+      // Якщо пост вже має координати — використовуємо їх
+      if (p.latitude !== undefined && p.longitude !== undefined) {
+        return { post: p, coords: { lat: p.latitude, lng: p.longitude } }
+      }
+      const coords = await geocodeLocation(p.location)
+      return { post: p, coords }
+    })
+  )
+ 
+  // 3. Рахуємо скільки постів вдалося геокодувати
+  const geocodedCount = postsWithCoords.filter(({ coords }) => coords !== null).length
+  const geocodingWorking = geocodedCount > 0
+ 
+  console.log(`Geocoding: ${geocodedCount}/${posts.length} posts geocoded successfully`)
+ 
+  // 4. Фільтруємо за відстанню
+  const nearby = postsWithCoords.filter(({ coords }) => {
+    if (!coords) {
+      // Якщо геокодування зламане — включаємо всі пости без координат
+      // Якщо геокодування працює — виключаємо пости без координат
+      return !geocodingWorking
+    }
+    const dist = haversineDistance(
+      volunteerCoords.lat, volunteerCoords.lng,
+      coords.lat, coords.lng
+    )
+    return dist <= radiusKm
+  }).map(({ post }) => post)
+ 
+  // 5. Fallback — якщо після фільтрації нічого не залишилось
+  const usingFallback = nearby.length === 0
+  const result = usingFallback ? posts : nearby
+ 
+  if (usingFallback) {
+    console.log(`No events within ${radiusKm}km of ${volunteerCity} — showing all (fallback)`)
+  } else {
+    console.log(`Found ${nearby.length} events within ${radiusKm}km of ${volunteerCity}`)
+  }
+ 
+  return {
+    posts: result,
+    volunteerCoords,
+    nearbyCount: nearby.length,
+    usingFallback,
+  }
+}
+// ─── Рекомендації з геофільтрацією ──────────────────────────────────────
  
 export async function fetchAIRecommendations(
   volunteer: ReturnType<typeof buildVolunteerProfile>,
-  posts: Post[]
+  posts: Post[],
+  radiusKm = 50
 ) {
-  const mappedPosts = mapPostsForAI(
-    posts.filter(p => p.type === 'ПОДІЯ' && p.status !== 'closed')
-  )
+  const openEvents = posts.filter(p => p.type === 'ПОДІЯ' && p.status !== 'closed')
+  const totalEvents = openEvents.length
+ 
+  // Геофільтруємо
+  const { posts: nearbyPosts, nearbyCount, usingFallback } =
+    await filterPostsByRadius(openEvents, volunteer.city, radiusKm)
+ 
+  // Fallback — якщо поряд нічого, показуємо все
+  const postsToSend = nearbyPosts.length > 0 ? nearbyPosts : openEvents
+ 
   const res = await fetch('/api/ai/recommend', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ volunteer, availablePosts: mappedPosts }),
+    body: JSON.stringify({
+      volunteer,
+      availablePosts: mapPostsForAI(postsToSend),
+      filterMeta: {
+        radiusKm,
+        volunteerCity: volunteer.city,
+        volunteerCoordsFound: !usingFallback,
+        totalEvents,
+        nearbyEvents: nearbyCount,
+        usingFallback: nearbyPosts.length === 0,
+      },
+    }),
   })
+ 
   if (!res.ok) throw new Error('Не вдалося отримати рекомендації')
-  return res.json()
+  const data = await res.json()
+ 
+  // Додаємо мету до відповіді щоб компонент міг її показати
+  return {
+    ...data,
+    _geoMeta: {
+      radiusKm,
+      volunteerCity: volunteer.city,
+      nearbyEvents: nearbyCount,
+      totalEvents,
+      usingFallback: nearbyPosts.length === 0,
+    },
+  }
 }
  
-// export async function fetchAIForecast(posts: Post[], bookings: Booking[]) {
-//   const stats = buildForecastStats(posts, bookings)
-//   const res = await fetch('/api/ai/forecast', {
-//     method: 'POST',
-//     headers: { 'Content-Type': 'application/json' },
-//     body: JSON.stringify(stats),
-//   })
-//   if (!res.ok) throw new Error('Не вдалося отримати прогноз')
-//   return res.json()
-// }
+// ─── Прогноз ────────────────────────────────────────────────────────────
+ 
 export async function fetchAIForecast(posts: Post[], bookings: Booking[]) {
   const stats = buildForecastStats(posts, bookings)
-  
-  console.log('Forecast stats being sent:', JSON.stringify(stats, null, 2)) // ← тимчасово
-  
   const res = await fetch('/api/ai/forecast', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(stats),
   })
-  
   if (!res.ok) {
     const errText = await res.text()
-    console.error('Forecast API error:', res.status, errText) // ← тимчасово
+    console.error('Forecast API error:', res.status, errText)
     throw new Error(`Forecast failed: ${res.status} ${errText}`)
   }
-  
   return res.json()
 }
+ 
+// ─── Чат ────────────────────────────────────────────────────────────────
  
 export async function sendAIChatMessage(
   messages: { role: 'user' | 'assistant'; content: string }[],
@@ -194,7 +262,6 @@ export async function sendAIChatMessage(
   bookings?: Booking[]
 ) {
   const platformData = posts ? buildPlatformSnapshot(posts, bookings ?? []) : undefined
-
   const res = await fetch('/api/ai/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -203,28 +270,29 @@ export async function sendAIChatMessage(
   if (!res.ok) throw new Error('Не вдалося отримати відповідь')
   return res.json() as Promise<{ reply: string }>
 }
-
+ 
+// ─── Знімок платформи для чату ───────────────────────────────────────────
+ 
 export function buildPlatformSnapshot(posts: Post[], bookings: Booking[]) {
   const openEvents = posts.filter(p => p.type === 'ПОДІЯ' && p.status !== 'closed')
   const urgentPosts = posts.filter(p => p.status === 'urgent')
   const fundraisers = posts.filter(p => p.type === 'ЗБІР' && p.status !== 'closed')
-
+ 
   const shortageByCity = openEvents
-    .map(p => {
-      const city = p.location.split(',')[0]?.trim() ?? p.location
-      const spotsLeft =
-        p.maxParticipants !== undefined && p.currentParticipants !== undefined
-          ? p.maxParticipants - p.currentParticipants
-          : null
-      return { city, title: p.title, spotsLeft, urgent: p.status === 'urgent' }
-    })
+    .map(p => ({
+      city: p.location.split(',')[0]?.trim() ?? p.location,
+      title: p.title,
+      spotsLeft: p.maxParticipants !== undefined && p.currentParticipants !== undefined
+        ? p.maxParticipants - p.currentParticipants : null,
+      urgent: p.status === 'urgent',
+    }))
     .filter(e => e.spotsLeft === null || e.spotsLeft > 0)
     .sort((a, b) => {
       if (a.urgent && !b.urgent) return -1
       if (!a.urgent && b.urgent) return 1
       return (a.spotsLeft ?? 99) - (b.spotsLeft ?? 99)
     })
-
+ 
   return {
     totalPosts: posts.length,
     openEventsCount: openEvents.length,
@@ -234,9 +302,8 @@ export function buildPlatformSnapshot(posts: Post[], bookings: Booking[]) {
     urgentEvents: urgentPosts.slice(0, 6).map(p => ({
       title: p.title,
       city: p.location.split(',')[0]?.trim(),
-      spotsLeft:
-        p.maxParticipants !== undefined && p.currentParticipants !== undefined
-          ? p.maxParticipants - p.currentParticipants : null,
+      spotsLeft: p.maxParticipants !== undefined && p.currentParticipants !== undefined
+        ? p.maxParticipants - p.currentParticipants : null,
       tags: p.tags.slice(0, 4),
       date: p.date,
     })),
@@ -245,9 +312,8 @@ export function buildPlatformSnapshot(posts: Post[], bookings: Booking[]) {
       title: p.title,
       city: p.location.split(',')[0]?.trim(),
       date: p.date,
-      spotsLeft:
-        p.maxParticipants !== undefined && p.currentParticipants !== undefined
-          ? p.maxParticipants - p.currentParticipants : null,
+      spotsLeft: p.maxParticipants !== undefined && p.currentParticipants !== undefined
+        ? p.maxParticipants - p.currentParticipants : null,
       tags: p.tags.slice(0, 3),
     })),
     activeFundraisers: fundraisers.slice(0, 5).map(p => ({
@@ -261,3 +327,4 @@ export function buildPlatformSnapshot(posts: Post[], bookings: Booking[]) {
     cities: [...new Set(posts.map(p => p.location.split(',')[0]?.trim()))].slice(0, 10),
   }
 }
+ 
